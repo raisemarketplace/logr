@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +32,7 @@ var (
 		return &Message{}
 	}
 
+	mutex    = sync.RWMutex{}
 	writers  = make(map[io.Writer]Type, 0)
 	pool     = &sync.Pool{}
 	messages = make(chan *Message, 100)
@@ -38,7 +40,7 @@ var (
 
 // Colour setting for colourful log output
 var (
-	Colour  = true
+	Colour  = false
 	ColourP = "\x1B[38;5;124m"
 	ColourE = "\x1B[38;5;124m"
 	ColourW = "\x1B[38;5;208m"
@@ -58,9 +60,14 @@ func Wait() {
 }
 
 // Output logs matching the given type filter to the given writers.
-func Output(t Type, to ...io.Writer) {
-	for _, w := range to {
-		writers[w] = t
+func Output(t Type, w io.Writer) (stop func()) {
+	mutex.Lock()
+	writers[w] = t
+	mutex.Unlock()
+	return func() {
+		mutex.Lock()
+		delete(writers, w)
+		mutex.Unlock()
 	}
 }
 
@@ -154,12 +161,14 @@ func golog() {
 		m.Reset()
 		pool.Put(m)
 
+		mutex.RLock()
 		for w, l := range writers {
 			if t&l != t {
 				continue
 			}
 			w.Write([]byte(s))
 		}
+		mutex.RUnlock()
 
 		close(ch)
 	}
@@ -177,24 +186,29 @@ func (m *Message) Code() string {
 
 // String implements fmt.Stringer
 func (m *Message) String() string {
-	msg := fmt.Sprintf("%-25s | %s | %s | %s\n", m.Time.Format("Jan 02 2006 15:04:05.9999"), m.Code(), m.T, fmt.Sprint(m.Args...))
+	args := ""
+	for _, arg := range m.Args {
+		args = fmt.Sprintf("%s %v", args, arg)
+	}
+	args = strings.TrimSpace(args)
 	if !Colour {
-		return msg
+		return fmt.Sprintf("%-25s | %s | %s | %s\n", m.Time.Format("Jan 02 2006 15:04:05.9999"), m.Code(), m.T, args)
 	}
 
+	msg := fmt.Sprintf("%-25s | %s | %s | "+ColourReset+"%s\n", m.Time.Format("Jan 02 2006 15:04:05.9999"), m.Code(), m.T, args)
 	switch m.T {
 	case P:
-		msg = ColourP + msg + ColourReset
+		msg = ColourP + msg
 	case E:
-		msg = ColourE + msg + ColourReset
+		msg = ColourE + msg
 	case W:
-		msg = ColourW + msg + ColourReset
+		msg = ColourW + msg
 	case I:
-		msg = ColourI + msg + ColourReset
+		msg = ColourI + msg
 	case D:
-		msg = ColourD + msg + ColourReset
+		msg = ColourD + msg
 	case S:
-		msg = ColourS + msg + ColourReset
+		msg = ColourS + msg
 	}
 	return msg
 }
