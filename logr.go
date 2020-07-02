@@ -56,7 +56,7 @@ func init() {
 
 // Wait for log messages to be processed
 func Wait() {
-	time.Sleep(time.Nanosecond * 1000)
+	time.Sleep(time.Millisecond)
 }
 
 // Output logs matching the given type filter to the given writers.
