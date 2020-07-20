@@ -26,27 +26,50 @@ func FormatJSON(m *Message) []byte {
 
 // LogrFormat is a Formatter that converts a Message to a default format.
 func FormatDefault(m *Message) []byte {
-	s := fmt.Sprintf(
-		"%-25s | %s | %s | %s | %+v\n",
-		m.Time,
-		m.Code,
-		m.Type.Rune(),
-		m.Desc,
-		m.Meta,
-	)
+	var s string
+	if m.Meta == nil {
+		s = fmt.Sprintf(
+			"%-25s | %s | %s | %s\n",
+			m.Time,
+			m.Code,
+			m.Type.Rune(),
+			m.Desc,
+		)
+	} else {
+		s = fmt.Sprintf(
+			"%-25s | %s | %s | %s | %+v\n",
+			m.Time,
+			m.Code,
+			m.Type.Rune(),
+			m.Desc,
+			m.Meta,
+		)
+	}
 	return []byte(s)
 }
 
 // FormatWithColours is a Formatter that converts a Message to a colourful default format.
 func FormatWithColours(m *Message) []byte {
-	s := fmt.Sprintf(
-		m.Type.Colour()+"%-25s | %s | %s | "+ColourReset+"%s"+m.Type.Colour()+" | %+v"+ColourReset+"\n",
-		m.Time,
-		m.Code,
-		m.Type.Rune(),
-		m.Desc,
-		m.Meta,
-	)
+	var s string
+	if m.Meta == nil {
+		s = fmt.Sprintf(
+			m.Type.Colour()+"%-25s | %s | %s | "+ColourReset+"%s\n",
+			m.Time,
+			m.Code,
+			m.Type.Rune(),
+			m.Desc,
+		)
+	} else {
+		s = fmt.Sprintf(
+			m.Type.Colour()+"%-25s | %s | %s | "+ColourReset+"%s"+m.Type.Colour()+" | %+v"+ColourReset+"\n",
+			m.Time,
+			m.Code,
+			m.Type.Rune(),
+			m.Desc,
+			m.Meta,
+		)
+	}
+
 	return []byte(s)
 }
 
