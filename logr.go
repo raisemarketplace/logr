@@ -4,218 +4,227 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
 
-const (
-	// ColourReset code
-	ColourReset = "\x1B[0m"
-)
-
-type (
-	// Message used to send log message to logger goroutine
-	Message struct {
-		T      Type
-		Time   time.Time
-		Args   []interface{}
-		chDone chan bool
-	}
-)
-
 var (
-	// Level sets the default log filter level.
-	Level = Critical
-	// NewMessageFunc factory function for log message
-	NewMessageFunc = func() interface{} {
-		return &Message{}
+	messages chan *Message
+
+	logr    Logger = &Logr{}
+	pool           = &sync.Pool{}
+	writers        = make(map[*WriterConfig]io.Writer)
+)
+
+// SetMeta sets the global meta data attached to every log message
+func SetMeta(data map[string]interface{}) {
+	logr = logr.With(data)
+}
+
+// SetBufferSize updates the message queue buffer size. Default size is 10,000 (10K)
+func SetBufferSize(size int) {
+	if messages != nil {
+		close(messages)
+		Wait()
 	}
-
-	mutex    = sync.RWMutex{}
-	writers  = make(map[io.Writer]Type, 0)
-	pool     = &sync.Pool{}
-	messages = make(chan *Message, 100)
-)
-
-// Colour setting for colourful log output
-var (
-	Colour  = false
-	ColourP = "\x1B[38;5;124m"
-	ColourE = "\x1B[38;5;124m"
-	ColourW = "\x1B[38;5;208m"
-	ColourI = "\x1B[38;5;33m"
-	ColourD = "\x1B[38;5;153m"
-	ColourS = "\x1B[38;5;34m"
-)
-
-func init() {
-	pool.New = NewMessageFunc
-	go golog()
+	msgs := make(chan *Message, size)
+	go listen(msgs)
+	messages = msgs
 }
 
 // Wait for log messages to be processed
 func Wait() {
-	time.Sleep(time.Nanosecond * 1000)
-}
-
-// Output logs matching the given type filter to the given writers.
-func Output(t Type, w io.Writer) (stop func()) {
-	mutex.Lock()
-	writers[w] = t
-	mutex.Unlock()
-	return func() {
-		mutex.Lock()
-		delete(writers, w)
-		mutex.Unlock()
+	for {
+		time.Sleep(time.Millisecond)
+		if messages == nil || len(messages) == 0 {
+			break
+		}
 	}
 }
 
+// Logger defines the methods available both by the logr package and Logr containing additional meta data.
+type Logger interface {
+	Panic(v ...interface{})
+	Panicf(msg string, v ...interface{})
+	Error(v ...interface{}) string
+	Errorf(msg string, v ...interface{}) string
+	Warn(v ...interface{}) string
+	Warnf(msg string, v ...interface{}) string
+	Info(v ...interface{}) string
+	Infof(msg string, v ...interface{}) string
+	Debug(v ...interface{}) string
+	Debugf(msg string, v ...interface{}) string
+	Success(v ...interface{}) string
+	Successf(msg string, v ...interface{}) string
+	With(data map[string]interface{}) Logger
+}
+
+// Logr implements the Logger interface
+type Logr struct {
+	meta map[string]interface{}
+}
+
 // Panic logs inputs as panics and panics
-func Panic(v ...interface{}) {
-	code := log(P, true, v...)
+func (l *Logr) Panic(v ...interface{}) {
+	code := log(P, true, Interfaces(v).SSV(), l.meta)
 	panic(code)
 }
 
 // Panicf logs a formatted message as a panic and panics
-func Panicf(msg string, v ...interface{}) {
-	code := logf(P, true, msg, v...)
+func (l *Logr) Panicf(msg string, v ...interface{}) {
+	code := logf(P, true, msg, v, l.meta)
 	panic(code)
 }
 
 // Error logs inputs as errors
-func Error(v ...interface{}) string {
-	return log(E, false, v...)
+func (l *Logr) Error(v ...interface{}) string {
+	return log(E, false, Interfaces(v).SSV(), l.meta)
 }
 
 // Errorf logs a formatted message as an error
-func Errorf(msg string, v ...interface{}) string {
-	return logf(E, false, msg, v...)
+func (l *Logr) Errorf(msg string, v ...interface{}) string {
+	return logf(E, false, msg, v, l.meta)
 }
 
 // Warn logs inputs as warnings
-func Warn(v ...interface{}) string {
-	return log(W, false, v...)
+func (l *Logr) Warn(v ...interface{}) string {
+	return log(W, false, Interfaces(v).SSV(), l.meta)
 }
 
 // Warnf logs a formatted message as a warning
-func Warnf(msg string, v ...interface{}) string {
-	return logf(W, false, msg, v...)
+func (l *Logr) Warnf(msg string, v ...interface{}) string {
+	return logf(W, false, msg, v, l.meta)
 }
 
 // Info logs inputs as info messages
-func Info(v ...interface{}) string {
-	return log(I, false, v...)
+func (l *Logr) Info(v ...interface{}) string {
+	return log(I, false, Interfaces(v).SSV(), l.meta)
 }
 
 // Infof logs a formatted message as an info message
-func Infof(msg string, v ...interface{}) string {
-	return logf(I, false, msg, v...)
+func (l *Logr) Infof(msg string, v ...interface{}) string {
+	return logf(I, false, msg, v, l.meta)
 }
 
 // Debug logs inputs as debug messages
-func Debug(v ...interface{}) string {
-	return log(D, false, v...)
+func (l *Logr) Debug(v ...interface{}) string {
+	return log(D, false, Interfaces(v).SSV(), l.meta)
 }
 
 // Debugf logs a formatted message as a debug message
-func Debugf(msg string, v ...interface{}) string {
-	return logf(D, false, msg, v...)
+func (l *Logr) Debugf(msg string, v ...interface{}) string {
+	return logf(D, false, msg, v, l.meta)
 }
 
 // Success logs inputs as success messages
-func Success(v ...interface{}) string {
-	return log(S, false, v...)
+func (l *Logr) Success(v ...interface{}) string {
+	return log(S, false, Interfaces(v).SSV(), l.meta)
 }
 
 // Successf logs a formatted message as a success message
-func Successf(msg string, v ...interface{}) string {
-	return logf(S, false, msg, v...)
+func (l *Logr) Successf(msg string, v ...interface{}) string {
+	return logf(S, false, msg, v, l.meta)
 }
 
-// log inputs to given type
-func log(t Type, wait bool, v ...interface{}) string {
-	done := make(chan bool)
-	m := pool.Get().(*Message)
-	m.T = t
-	m.Time = time.Now()
-	m.Args = v
-	m.chDone = done
-	c := m.Code()
-	messages <- m
-
-	if wait {
-		<-done
+// With metadata in the log messages
+func (l *Logr) With(data map[string]interface{}) Logger {
+	meta := make(map[string]interface{})
+	for k, v := range l.meta {
+		meta[k] = v
 	}
-
-	return c
-}
-
-// Concurrently work through the logs buffered channel
-func golog() {
-	for {
-		m := <-messages
-		t := m.T
-		s := m.String()
-		ch := m.chDone
-		m.Reset()
-		pool.Put(m)
-
-		mutex.RLock()
-		for w, l := range writers {
-			if t&l != t {
-				continue
-			}
-			w.Write([]byte(s))
-		}
-		mutex.RUnlock()
-
-		close(ch)
+	for k, v := range data {
+		meta[k] = v
+	}
+	return &Logr{
+		meta: meta,
 	}
 }
 
 // format a msg and log as given type
-func logf(t Type, wait bool, msg string, v ...interface{}) string {
-	return log(t, wait, fmt.Sprintf(msg, v...))
+func logf(t Type, wait bool, msg string, args []interface{}, meta map[string]interface{}) string {
+	return log(t, wait, fmt.Sprintf(msg, args...), meta)
 }
 
-// Code returns a message code for later tracking
-func (m *Message) Code() string {
-	return strconv.FormatInt(m.Time.UnixNano(), 36)
+// log inputs to given type
+func log(t Type, wait bool, msg string, meta map[string]interface{}) string {
+	now := time.Now()
+	m := pool.Get().(*Message)
+	m.Type = t
+	m.Time = now.Format("Jan 02 2006 15:04:05.9999")
+	m.Code = strconv.FormatInt(now.UnixNano(), 36)
+	m.Desc = msg
+	m.Meta = meta
+	m.done = make(chan struct{})
+	messages <- m
+
+	if wait {
+		<-m.done
+	}
+
+	return m.Code
 }
 
-// String implements fmt.Stringer
-func (m *Message) String() string {
-	args := ""
-	for _, arg := range m.Args {
-		args = fmt.Sprintf("%s %v", args, arg)
-	}
-	args = strings.TrimSpace(args)
-	if !Colour {
-		return fmt.Sprintf("%-25s | %s | %s | %s\n", m.Time.Format("Jan 02 2006 15:04:05.9999"), m.Code(), m.T, args)
-	}
-
-	msg := fmt.Sprintf("%-25s | %s | %s | "+ColourReset+"%s\n", m.Time.Format("Jan 02 2006 15:04:05.9999"), m.Code(), m.T, args)
-	switch m.T {
-	case P:
-		msg = ColourP + msg
-	case E:
-		msg = ColourE + msg
-	case W:
-		msg = ColourW + msg
-	case I:
-		msg = ColourI + msg
-	case D:
-		msg = ColourD + msg
-	case S:
-		msg = ColourS + msg
-	}
-	return msg
+// Panic logs inputs as panics and panics
+func Panic(v ...interface{}) {
+	logr.Panic(v...)
 }
 
-// Reset the message object for later reuse
-func (m *Message) Reset() {
-	m.T = 0
-	m.Time = time.Time{}
-	m.Args = make([]interface{}, 0)
+// Panicf logs a formatted message as a panic and panics
+func Panicf(msg string, v ...interface{}) {
+	logr.Panicf(msg, v...)
+}
+
+// Error logs inputs as errors
+func Error(v ...interface{}) string {
+	return logr.Error(v...)
+}
+
+// Errorf logs a formatted message as an error
+func Errorf(msg string, v ...interface{}) string {
+	return logr.Errorf(msg, v...)
+}
+
+// Warn logs inputs as warnings
+func Warn(v ...interface{}) string {
+	return logr.Warn(v...)
+}
+
+// Warnf logs a formatted message as a warning
+func Warnf(msg string, v ...interface{}) string {
+	return logr.Warnf(msg, v...)
+}
+
+// Info logs inputs as info messages
+func Info(v ...interface{}) string {
+	return logr.Info(v...)
+}
+
+// Infof logs a formatted message as an info message
+func Infof(msg string, v ...interface{}) string {
+	return logr.Infof(msg, v...)
+}
+
+// Debug logs inputs as debug messages
+func Debug(v ...interface{}) string {
+	return logr.Debug(v...)
+}
+
+// Debugf logs a formatted message as a debug message
+func Debugf(msg string, v ...interface{}) string {
+	return logr.Debugf(msg, v...)
+}
+
+// Success logs inputs as success messages
+func Success(v ...interface{}) string {
+	return logr.Success(v...)
+}
+
+// Successf logs a formatted message as a success message
+func Successf(msg string, v ...interface{}) string {
+	return logr.Successf(msg, v...)
+}
+
+// With metadata in the log messages
+func With(data map[string]interface{}) Logger {
+	return logr.With(data)
 }
