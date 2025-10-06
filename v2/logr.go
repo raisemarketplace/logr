@@ -129,8 +129,10 @@ func (l *Logr) Successf(msg string, v ...any) string {
 // With metadata in the log messages
 func (l *Logr) With(data Meta) Logger {
 	meta := l.meta.Copy()
-	for k, v := range data {
-		meta.With(k, v)
+	if data != nil {
+		for k, v := range data {
+			meta.With(k, v)
+		}
 	}
 	return &Logr{
 		meta: meta,
@@ -224,4 +226,9 @@ func Successf(msg string, v ...any) string {
 // With metadata in the log messages
 func With(data Meta) Logger {
 	return logr.With(data)
+}
+
+// Default gets the default logger
+func Default() Logger {
+	return logr
 }
